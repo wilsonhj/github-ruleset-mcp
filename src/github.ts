@@ -1,9 +1,22 @@
 /**
  * GitHub API client for ruleset operations
+ *
+ * Uses type assertions at API boundaries since our internal Ruleset type
+ * is intentionally generic. Validation happens via MCP schema + runtime checks.
  */
 
 import { Octokit } from '@octokit/rest';
 import type { Ruleset } from './templates.js';
+
+// Internal types for Octokit responses (loosely typed to avoid strict union issues)
+type OctokitRulesetResponse = {
+  id: number;
+  name: string;
+  enforcement: string;
+  conditions?: {
+    ref_name?: { include?: string[]; exclude?: string[] };
+  } | null;
+};
 
 export class GitHubClient {
   private octokit: Octokit;
@@ -34,26 +47,33 @@ export class GitHubClient {
     }
 
     try {
+      // Build the request payload with explicit typing at the boundary
+      const payload = {
+        owner,
+        repo,
+        name: ruleset.name,
+        target: 'branch' as const,
+        enforcement: ruleset.enforcement as 'active' | 'disabled' | 'evaluate',
+        conditions: {
+          ref_name: { include: ruleset.target_branches, exclude: [] as string[] }
+        },
+        rules: ruleset.rules.map(r => ({
+          type: r.type,
+          ...(r.parameters && { parameters: r.parameters })
+        })),
+        bypass_actors: ruleset.bypass_actors?.map(a => ({
+          actor_type: a.actor_type,
+          bypass_mode: a.bypass_mode
+        })) || []
+      };
+
+      // Use type assertion at the API call boundary
       const response = await this.octokit.request(
         'POST /repos/{owner}/{repo}/rulesets',
-        {
-          owner,
-          repo,
-          name: ruleset.name,
-          target: 'branch',
-          enforcement: ruleset.enforcement,
-          conditions: {
-            ref_name: { include: ruleset.target_branches, exclude: [] }
-          },
-          rules: ruleset.rules.map(r => ({
-            type: r.type,
-            parameters: r.parameters
-          })),
-          bypass_actors: ruleset.bypass_actors || []
-        }
+        payload as unknown as Parameters<typeof this.octokit.request<'POST /repos/{owner}/{repo}/rulesets'>>[1]
       );
 
-      return { success: true, id: response.data.id };
+      return { success: true, id: (response.data as OctokitRulesetResponse).id };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return { success: false, error: message };
@@ -98,12 +118,10 @@ export class GitHubClient {
         { owner, repo }
       );
 
-      return response.data.map((rs: {
-        id: number;
-        name: string;
-        enforcement: string;
-        conditions?: { ref_name?: { include?: string[] } };
-      }) => ({
+      // Cast response.data to our loose internal type
+      const rulesets = response.data as OctokitRulesetResponse[];
+
+      return rulesets.map(rs => ({
         id: rs.id,
         name: rs.name,
         enforcement: rs.enforcement,
