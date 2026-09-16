@@ -1,5 +1,7 @@
 # github-ruleset-mcp
 
+**Author:** [Hirokazu J Wilson](https://github.com/wilsonhj)
+
 > Branch protection as code. 4 templates, 5 tools, 2-minute setup.
 
 An MCP server that lets Claude (or any MCP client) manage GitHub branch protection rulesets programmatically.
